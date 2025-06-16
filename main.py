@@ -17,14 +17,12 @@ import random
 logging.basicConfig(filename='scanner.log', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-
 def validate_ip(ip):
     try:
         ipaddress.ip_address(ip)
         return True
     except ValueError:
         return False
-
 
 def validate_ports(ports):
     valid_ports = []
@@ -36,7 +34,6 @@ def validate_ports(ports):
         except ValueError:
             continue
     return valid_ports
-
 
 def train_model():
     data = pd.read_csv('data.csv')
@@ -54,7 +51,6 @@ def train_model():
     print(f"ML model accuracy: {accuracy:.2f}")
 
     return model, list(X.columns)
-
 
 init(autoreset=True)
 banner = f"""
@@ -74,7 +70,6 @@ banner = f"""
 
 {Style.RESET_ALL}
 """
-
 
 
 def load_proxies(filename='proxies.txt'):
@@ -106,7 +101,6 @@ def main():
 def predict_vulnerabilities(model, features):
     pred = model.predict(pd.DataFrame([features]))
     return pred[0]
-
 
 def scan_with_nmap(target_ip, options=None, timeout=60):
     if not validate_ip(target_ip):
@@ -253,14 +247,11 @@ def generate_report(ip, attacks, results, directory="reports"):
         logging.error(f"Failed to save report: {e}")
 
 
-def get_tor_session():
-    pass
 
 
 def test_sqli_on_paths(ip, paths, timeout=5):
     sqli_payload = "' OR '1'='1"
     vulnerable_urls = []
-    session = get_tor_session()
 
     for path in paths:
         if '=' not in path:
@@ -440,4 +431,6 @@ if __name__ == "__main__":
     except Exception as e:
         logging.error(f"Fatal error: {e}")
         print(f"Error occurred: {e}")
+
+
 
