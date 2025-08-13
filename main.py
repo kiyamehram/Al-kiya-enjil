@@ -993,13 +993,31 @@ class RealTimeThreatAnalyzer:
     def __init__(self, model):
         self.model = model
         self.scaler = StandardScaler()
+        self._initialize_scaler()
         
+    def _initialize_scaler(self):
+        try:
+            latest_file = max(glob.glob('threat_data/traffic_data_*.csv'), 
+                            key=os.path.getctime)
+            train_data = pd.read_csv(latest_file)
+            X_train = train_data[['bytes', 'is_malicious']]
+            self.scaler.fit(X_train)  
+        except Exception as e:
+            print(f"Scaler init error: {e}")
+            self.scaler = None
+
     def analyze_network_traffic(self, traffic_data):
         try:
             traffic_df = pd.DataFrame([traffic_data])
             
-            features = traffic_df[['bytes']]
-            scaled_features = self.scaler.fit_transform(features)
+  
+            features = traffic_df[['bytes', 'is_malicious']]
+            
+            if self.scaler:
+                scaled_features = self.scaler.transform(features)  
+            else:
+                scaled_features = features  
+                print("Warning: Using unscaled features")
 
             prediction = self.model.predict(scaled_features)
             probability = self.model.predict_proba(scaled_features)[:,1]
@@ -1177,6 +1195,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n{Fore.RED}Error: {str(e)}{Style.RESET_ALL}")
         logging.exception("Scan failed")
+
 
 
 
