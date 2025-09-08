@@ -1048,18 +1048,74 @@ if __name__ == "__main__":
         print(f"\nTarget URL: {Fore.GREEN}{target_url}{Style.RESET_ALL}")
         print(f"Resolved IP: {Fore.BLUE}{target_ip}{Style.RESET_ALL}")
 
-        print(f"{Fore.CYAN}\nRunning Nmap scan to discover open ports...{Style.RESET_ALL}")
-        open_ports_data = scan_with_nmap(target_ip)
+        print(f"\n{Fore.CYAN}=== Port Discovery Method ==={Style.RESET_ALL}")
+        print("1. Automatic port scan with Nmap")
+        print("2. Manual port input")
         
-        if not open_ports_data:
-            print(f"{Fore.RED}Nmap scan failed or no open ports found!{Style.RESET_ALL}")
-            exit(1)
+        port_choice = input(f"{Fore.YELLOW}Select port discovery method (1-2): {Style.RESET_ALL}").strip()
+        
+        open_ports = []
+        services = []
+        
+        if port_choice == "1":
+            print(f"{Fore.CYAN}\nRunning Nmap scan to discover open ports...{Style.RESET_ALL}")
+            open_ports_data = scan_with_nmap(target_ip)
             
-        open_ports = [str(item['port']) for item in open_ports_data]
-        services = [item['service'] for item in open_ports_data]
-        
-        print(f"{Fore.GREEN}Found {len(open_ports)} open ports: {', '.join(open_ports)}{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}Services detected: {', '.join(set(services))}{Style.RESET_ALL}")
+            if not open_ports_data:
+                print(f"{Fore.RED}Nmap scan failed or no open ports found!{Style.RESET_ALL}")
+                exit(1)
+                
+            open_ports = [str(item['port']) for item in open_ports_data]
+            services = [item['service'] for item in open_ports_data]
+            
+            print(f"{Fore.GREEN}Found {len(open_ports)} open ports: {', '.join(open_ports)}{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}Services detected: {', '.join(set(services))}{Style.RESET_ALL}")
+            
+        elif port_choice == "2":
+            ports_input = input("Enter open ports (comma-separated): ")
+            open_ports = validate_ports([p.strip() for p in ports_input.split(",")])
+            
+            if not open_ports:
+                print(f"{Fore.RED}No valid ports entered!{Style.RESET_ALL}")
+                exit(1)
+                
+            services = []
+            for port in open_ports:
+                port_int = int(port)
+                if port_int == 80 or port_int == 443:
+                    services.append("http")
+                elif port_int == 22:
+                    services.append("ssh")
+                elif port_int == 21:
+                    services.append("ftp")
+                elif port_int == 25:
+                    services.append("smtp")
+                elif port_int == 53:
+                    services.append("dns")
+                else:
+                    services.append("unknown")
+            
+            print(f"{Fore.GREEN}Using manually entered ports: {', '.join(open_ports)}{Style.RESET_ALL}")
+            
+        else:
+            print(f"{Fore.RED}Invalid option! Using automatic scan by default.{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}\nRunning Nmap scan to discover open ports...{Style.RESET_ALL}")
+            open_ports_data = scan_with_nmap(target_ip)
+            
+            if open_ports_data:
+                open_ports = [str(item['port']) for item in open_ports_data]
+                services = [item['service'] for item in open_ports_data]
+                
+                print(f"{Fore.GREEN}Found {len(open_ports)} open ports: {', '.join(open_ports)}{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}Services detected: {', '.join(set(services))}{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}Nmap scan failed! Please try manual port entry.{Style.RESET_ALL}")
+                ports_input = input("Enter open ports (comma-separated): ")
+                open_ports = validate_ports([p.strip() for p in ports_input.split(",")])
+                
+                if not open_ports:
+                    print(f"{Fore.RED}No valid ports entered! Exiting.{Style.RESET_ALL}")
+                    exit(1)
 
         while True:
             print(f"\n{Fore.CYAN}=== Main Menu ==={Style.RESET_ALL}")
@@ -1071,9 +1127,10 @@ if __name__ == "__main__":
             print("6. Real-time Threat Analysis")
             print("7. Suggest Attack Vectors")
             print("8. Run Full Scan (All Tests)")
-            print("9. Exit")
+            print("9. Rescan Ports")
+            print("10. Exit")
             
-            choice = input(f"{Fore.YELLOW}Select an option (1-9): {Style.RESET_ALL}").strip()
+            choice = input(f"{Fore.YELLOW}Select an option (1-10): {Style.RESET_ALL}").strip()
             
             if choice == "1":
                 print(f"{Fore.CYAN}\nTesting SQL Injection...{Style.RESET_ALL}")
@@ -1219,6 +1276,8 @@ if __name__ == "__main__":
                         print(f"{Fore.RED}JWT vulnerability: {message}{Style.RESET_ALL}")
                     else:
                         print(f"{Fore.GREEN}{message}{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.YELLOW}JWT test skipped.{Style.RESET_ALL}")
             
             elif choice == "4":
                 print(f"{Fore.CYAN}\nTesting API Security...{Style.RESET_ALL}")
@@ -1229,9 +1288,13 @@ if __name__ == "__main__":
                     obj_id = input("Enter object ID to test: ").strip()
                     api_tester.test_broken_object_level_acl(endpoint, obj_id)
                 
-                api_tester.test_excessive_data_exposure("api/data")
+                api_endpoint = input("Enter API endpoint to test for data exposure (e.g., api/data): ").strip()
+                if api_endpoint:
+                    api_tester.test_excessive_data_exposure(api_endpoint)
                 
-                api_tester.test_mass_assignment("api/users")
+                user_endpoint = input("Enter user API endpoint to test for mass assignment (e.g., api/users): ").strip()
+                if user_endpoint:
+                    api_tester.test_mass_assignment(user_endpoint)
                 
                 if api_tester.vulnerabilities:
                     print(f"{Fore.RED}API vulnerabilities found:{Style.RESET_ALL}")
@@ -1281,21 +1344,49 @@ if __name__ == "__main__":
             
             elif choice == "8":
                 print(f"{Fore.CYAN}\nRunning Full Scan (All Tests)...{Style.RESET_ALL}")
-                print(f"{Fore.YELLOW}This would run all tests in sequence{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}Running all security tests in sequence...{Style.RESET_ALL}")
+                
+                test_functions = [
+                    ("SQL Injection", lambda: test_sqli_on_paths(target_ip, sqli_test_paths)),
+                    ("CSRF", lambda: CSRFTester().test_csrf_protection(target_url)),
+                    ("Cookie Analysis", lambda: CookieAnalyzer().analyze_cookies(target_url)),
+                ]
+                
+                for test_name, test_func in test_functions:
+                    print(f"{Fore.CYAN}Running {test_name} test...{Style.RESET_ALL}")
+                    try:
+                        result = test_func()
+                        if result:
+                            print(f"{Fore.GREEN}{test_name} test completed.{Style.RESET_ALL}")
+                        else:
+                            print(f"{Fore.YELLOW}{test_name} test returned no results.{Style.RESET_ALL}")
+                    except Exception as e:
+                        print(f"{Fore.RED}{test_name} test failed: {e}{Style.RESET_ALL}")
             
             elif choice == "9":
+                print(f"{Fore.CYAN}\nRescanning Ports...{Style.RESET_ALL}")
+                open_ports_data = scan_with_nmap(target_ip)
+                
+                if open_ports_data:
+                    open_ports = [str(item['port']) for item in open_ports_data]
+                    services = [item['service'] for item in open_ports_data]
+                    
+                    print(f"{Fore.GREEN}Found {len(open_ports)} open ports: {', '.join(open_ports)}{Style.RESET_ALL}")
+                    print(f"{Fore.GREEN}Services detected: {', '.join(set(services))}{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.RED}Rescan failed! Keeping previous port list.{Style.RESET_ALL}")
+            
+            elif choice == "10":
                 print(f"{Fore.GREEN}Exiting...{Style.RESET_ALL}")
                 break
             
             else:
-                print(f"{Fore.RED}Invalid option! Please choose 1-9.{Style.RESET_ALL}")
+                print(f"{Fore.RED}Invalid option! Please choose 1-10.{Style.RESET_ALL}")
 
     except KeyboardInterrupt:
         print(f"\n{Fore.YELLOW}Scan cancelled by user{Style.RESET_ALL}")
     except Exception as e:
         print(f"\n{Fore.RED}Error: {str(e)}{Style.RESET_ALL}")
         logging.exception("Scan failed")
-
-
 
 
