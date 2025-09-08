@@ -1044,20 +1044,40 @@ if __name__ == "__main__":
         
         analyzer = RealTimeThreatAnalyzer(model)
         
-        target_ip = input("Enter target IP: ").strip()
-        if not validate_ip(target_ip):
-            print(f"{Fore.RED}Invalid IP address!{Style.RESET_ALL}")
+        target_url, target_ip = get_target()
+        print(f"\nTarget URL: {Fore.GREEN}{target_url}{Style.RESET_ALL}")
+        print(f"Resolved IP: {Fore.BLUE}{target_ip}{Style.RESET_ALL}")
+
+        print(f"{Fore.CYAN}\nRunning Nmap scan to discover open ports...{Style.RESET_ALL}")
+        open_ports_data = scan_with_nmap(target_ip)
+        
+        if not open_ports_data:
+            print(f"{Fore.RED}Nmap scan failed or no open ports found!{Style.RESET_ALL}")
             exit(1)
+            
+        open_ports = [str(item['port']) for item in open_ports_data]
+        services = [item['service'] for item in open_ports_data]
+        
+        print(f"{Fore.GREEN}Found {len(open_ports)} open ports: {', '.join(open_ports)}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}Services detected: {', '.join(set(services))}{Style.RESET_ALL}")
 
-        ports_input = input("Enter open ports (comma-separated): ")
-        open_ports = validate_ports([p.strip() for p in ports_input.split(",")])
-        if not open_ports:
-            print(f"{Fore.RED}No valid ports entered!{Style.RESET_ALL}")
-            exit(1)
-
-        print(f"{Fore.CYAN}\nTesting SQL Injection...{Style.RESET_ALL}")
-
-        sqli_test_paths = [
+        while True:
+            print(f"\n{Fore.CYAN}=== Main Menu ==={Style.RESET_ALL}")
+            print("1. Run SQL Injection Test")
+            print("2. Run CSRF Test")
+            print("3. Run JWT Test")
+            print("4. Run API Security Test")
+            print("5. Analyze Cookies")
+            print("6. Real-time Threat Analysis")
+            print("7. Suggest Attack Vectors")
+            print("8. Run Full Scan (All Tests)")
+            print("9. Exit")
+            
+            choice = input(f"{Fore.YELLOW}Select an option (1-9): {Style.RESET_ALL}").strip()
+            
+            if choice == "1":
+                print(f"{Fore.CYAN}\nTesting SQL Injection...{Style.RESET_ALL}")
+                sqli_test_paths = [
             "view_items.php?id=",
             "home.php?cat=",
             "item_book.php?CAT=",
@@ -1163,40 +1183,118 @@ if __name__ == "__main__":
             "view_detail.php?ID=",
             "viewcart.php?CartId=",
             "viewCart.php?userID="
-        ]
+                ]
+                
+                vulnerable_urls = test_sqli_on_paths(target_ip, sqli_test_paths)
+                if vulnerable_urls:
+                    print(f"{Fore.RED}Found SQLi vulnerabilities:{Style.RESET_ALL}")
+                    for url in vulnerable_urls:
+                        print(f" - {url}")
+                else:
+                    print(f"{Fore.GREEN}No SQLi vulnerabilities found{Style.RESET_ALL}")
+            
+            elif choice == "2":
+                print(f"{Fore.CYAN}\nTesting CSRF...{Style.RESET_ALL}")
+                csrf_tester = CSRFTester()
+                if csrf_tester.detect_csrf_tokens(target_url):
+                    print(f"{Fore.YELLOW}CSRF tokens detected{Style.RESET_ALL}")
+                    csrf_tester.test_csrf_protection(target_url)
+                    
+                    if csrf_tester.vulnerable_endpoints:
+                        print(f"{Fore.RED}CSRF vulnerabilities found:{Style.RESET_ALL}")
+                        for vuln in csrf_tester.vulnerable_endpoints:
+                            print(f" - {vuln['url']} ({vuln['method']})")
+                    else:
+                        print(f"{Fore.GREEN}No CSRF vulnerabilities found{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.GREEN}No CSRF tokens detected{Style.RESET_ALL}")
+            
+            elif choice == "3":
+                print(f"{Fore.CYAN}\nTesting JWT...{Style.RESET_ALL}")
+                jwt_token = input("Enter JWT token to test (or press Enter to skip): ").strip()
+                if jwt_token:
+                    jwt_tester = JWTTester()
+                    is_vulnerable, message = jwt_tester.test_jwt(jwt_token)
+                    if is_vulnerable:
+                        print(f"{Fore.RED}JWT vulnerability: {message}{Style.RESET_ALL}")
+                    else:
+                        print(f"{Fore.GREEN}{message}{Style.RESET_ALL}")
+            
+            elif choice == "4":
+                print(f"{Fore.CYAN}\nTesting API Security...{Style.RESET_ALL}")
+                api_tester = APITester(target_url)
+                
+                endpoint = input("Enter API endpoint to test for BOLA (e.g., users/): ").strip()
+                if endpoint:
+                    obj_id = input("Enter object ID to test: ").strip()
+                    api_tester.test_broken_object_level_acl(endpoint, obj_id)
+                
+                api_tester.test_excessive_data_exposure("api/data")
+                
+                api_tester.test_mass_assignment("api/users")
+                
+                if api_tester.vulnerabilities:
+                    print(f"{Fore.RED}API vulnerabilities found:{Style.RESET_ALL}")
+                    for vuln in api_tester.vulnerabilities:
+                        print(f" - {vuln['type']}: {vuln['description']}")
+                else:
+                    print(f"{Fore.GREEN}No API vulnerabilities found{Style.RESET_ALL}")
+            
+            elif choice == "5":
+                print(f"{Fore.CYAN}\nAnalyzing Cookies...{Style.RESET_ALL}")
+                cookie_analyzer = CookieAnalyzer()
+                result = cookie_analyzer.analyze_cookies(target_url)
+                
+                if result.get('error'):
+                    print(f"{Fore.RED}Error: {result['error']}{Style.RESET_ALL}")
+                else:
+                    if result['security_issues']:
+                        print(f"{Fore.RED}Cookie security issues found:{Style.RESET_ALL}")
+                        for issue in result['security_issues']:
+                            print(f" - {issue['cookie_name']}: {', '.join(issue['issues'])}")
+                    else:
+                        print(f"{Fore.GREEN}No cookie security issues found{Style.RESET_ALL}")
+            
+            elif choice == "6":
+                print(f"{Fore.CYAN}\nRunning Real-time Threat Analysis...{Style.RESET_ALL}")
+                live_traffic = {
+                    'src_ip': input("Enter source IP [192.168.1.105]: ") or "192.168.1.105",
+                    'dst_ip': input("Enter dest IP [10.0.0.3]: ") or "10.0.0.3",
+                    'bytes': int(input("Enter bytes [5842]: ") or 5842),
+                    'is_malicious': 0
+                }
 
-
-        vulnerable_urls = test_sqli_on_paths(target_ip, sqli_test_paths)
-        if vulnerable_urls:
-            print(f"{Fore.RED}Found vulnerabilities:{Style.RESET_ALL}")
-            for url in vulnerable_urls:
-                print(f" - {url}")
-        else:
-            print(f"{Fore.GREEN}No SQLi vulnerabilities found{Style.RESET_ALL}")
-
-        live_traffic = {
-            'src_ip': input("Enter source IP [192.168.1.105]: ") or "192.168.1.105",
-            'dst_ip': input("Enter dest IP [10.0.0.3]: ") or "10.0.0.3",
-            'bytes': int(input("Enter bytes [5842]: ") or 5842),
-            'is_malicious': 0
-        }
-
-        result = analyzer.analyze_network_traffic(live_traffic)
-        if result:
-            print(f"\n{Fore.BLUE}Analysis Result:{Style.RESET_ALL}")
-            print(f"Threat: {Fore.RED if result['is_threat'] else Fore.GREEN}{result['is_threat']}{Style.RESET_ALL}")
-            print(f"Probability: {result['threat_probability']:.2f}")
-            print(f"Time: {result['timestamp']}")
-        else:
-            print(f"{Fore.YELLOW}Analysis failed{Style.RESET_ALL}")
+                result = analyzer.analyze_network_traffic(live_traffic)
+                if result:
+                    print(f"\n{Fore.BLUE}Analysis Result:{Style.RESET_ALL}")
+                    print(f"Threat: {Fore.RED if result['is_threat'] else Fore.GREEN}{result['is_threat']}{Style.RESET_ALL}")
+                    print(f"Probability: {result['threat_probability']:.2f}")
+                    print(f"Time: {result['timestamp']}")
+                else:
+                    print(f"{Fore.YELLOW}Analysis failed{Style.RESET_ALL}")
+            
+            elif choice == "7":
+                print(f"{Fore.CYAN}\nSuggesting Attack Vectors...{Style.RESET_ALL}")
+                suggestions = suggest_attacks(target_ip, services)
+                print(f"{Fore.YELLOW}Suggested attacks:{Style.RESET_ALL}")
+                print(suggestions)
+            
+            elif choice == "8":
+                print(f"{Fore.CYAN}\nRunning Full Scan (All Tests)...{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}This would run all tests in sequence{Style.RESET_ALL}")
+            
+            elif choice == "9":
+                print(f"{Fore.GREEN}Exiting...{Style.RESET_ALL}")
+                break
+            
+            else:
+                print(f"{Fore.RED}Invalid option! Please choose 1-9.{Style.RESET_ALL}")
 
     except KeyboardInterrupt:
         print(f"\n{Fore.YELLOW}Scan cancelled by user{Style.RESET_ALL}")
     except Exception as e:
         print(f"\n{Fore.RED}Error: {str(e)}{Style.RESET_ALL}")
         logging.exception("Scan failed")
-
-
 
 
 
