@@ -305,7 +305,7 @@ class ThreatDetectionModel:
 class RealTimeThreatAnalyzer:
     def __init__(self):
         self.model = ThreatDetectionModel()
-        self.scaler = StandardScaler()  # Add scaler for feature normalization
+        self.scaler = StandardScaler()  
         if not self.model.load_model():
             raise RuntimeError("Failed to initialize threat detection model")
 
@@ -1391,4 +1391,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n{Fore.RED}Error: {str(e)}{Style.RESET_ALL}")
         logging.exception("Scan failed")
+
 
