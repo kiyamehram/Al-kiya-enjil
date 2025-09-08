@@ -1048,7 +1048,6 @@ if __name__ == "__main__":
         print(f"\nTarget URL: {Fore.GREEN}{target_url}{Style.RESET_ALL}")
         print(f"Resolved IP: {Fore.BLUE}{target_ip}{Style.RESET_ALL}")
 
-        # بررسی دسترسی به هدف
         def is_target_reachable(ip):
             try:
                 socket.create_connection((ip, 80), timeout=5)
@@ -1392,3 +1391,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n{Fore.RED}Error: {str(e)}{Style.RESET_ALL}")
         logging.exception("Scan failed")
+
