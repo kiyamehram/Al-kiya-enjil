@@ -1048,6 +1048,15 @@ if __name__ == "__main__":
         print(f"\nTarget URL: {Fore.GREEN}{target_url}{Style.RESET_ALL}")
         print(f"Resolved IP: {Fore.BLUE}{target_ip}{Style.RESET_ALL}")
 
+        # بررسی دسترسی به هدف
+        def is_target_reachable(ip):
+            try:
+                socket.create_connection((ip, 80), timeout=5)
+                return True
+            except (socket.timeout, socket.gaierror):
+                print(f"{Fore.RED}Target {ip} is unreachable or blocked{Style.RESET_ALL}")
+                return False
+
         print(f"\n{Fore.CYAN}=== Port Discovery Method ==={Style.RESET_ALL}")
         print("1. Automatic port scan with Nmap")
         print("2. Manual port input")
@@ -1058,31 +1067,42 @@ if __name__ == "__main__":
         services = []
         
         if port_choice == "1":
-            print(f"{Fore.CYAN}\nRunning Nmap scan to discover open ports...{Style.RESET_ALL}")
-            open_ports_data = scan_with_nmap(target_ip)
-            
-            if not open_ports_data:
-                print(f"{Fore.RED}Nmap scan failed or no open ports found!{Style.RESET_ALL}")
-                exit(1)
+            if not is_target_reachable(target_ip):
+                print(f"{Fore.YELLOW}Switching to manual port entry due to unreachable target{Style.RESET_ALL}")
+                port_choice = "2"
+            else:
+                print(f"{Fore.CYAN}\nRunning Nmap scan to discover open ports...{Style.RESET_ALL}")
+                open_ports_data = scan_with_nmap(target_ip, timeout=120)
                 
-            open_ports = [str(item['port']) for item in open_ports_data]
-            services = [item['service'] for item in open_ports_data]
-            
-            print(f"{Fore.GREEN}Found {len(open_ports)} open ports: {', '.join(open_ports)}{Style.RESET_ALL}")
-            print(f"{Fore.GREEN}Services detected: {', '.join(set(services))}{Style.RESET_ALL}")
-            
-        elif port_choice == "2":
-            ports_input = input("Enter open ports (comma-separated): ")
-            open_ports = validate_ports([p.strip() for p in ports_input.split(",")])
-            
-            if not open_ports:
-                print(f"{Fore.RED}No valid ports entered!{Style.RESET_ALL}")
-                exit(1)
+                if not open_ports_data:
+                    print(f"{Fore.RED}Nmap scan failed or no open ports found!{Style.RESET_ALL}")
+                    retry = input(f"{Fore.YELLOW}Retry scan (r) or enter ports manually (m)? [r/m]: {Style.RESET_ALL}").strip().lower()
+                    if retry == 'r':
+                        open_ports_data = scan_with_nmap(target_ip, timeout=120)
+                    else:
+                        port_choice = "2"
+                
+                if open_ports_data:
+                    open_ports = [str(item['port']) for item in open_ports_data]
+                    services = [item['service'] for item in open_ports_data]
+                    
+                    print(f"{Fore.GREEN}Found {len(open_ports)} open ports: {', '.join(open_ports)}{Style.RESET_ALL}")
+                    print(f"{Fore.GREEN}Services detected: {', '.join(set(services))}{Style.RESET_ALL}")
+                
+        if port_choice == "2":
+            while not open_ports:
+                ports_input = input("Enter open ports (comma-separated, e.g., 80,443,22) or press Enter to skip: ").strip()
+                if not ports_input:
+                    print(f"{Fore.YELLOW}No ports entered. Exiting.{Style.RESET_ALL}")
+                    exit(1)
+                open_ports = validate_ports([p.strip() for p in ports_input.split(",")])
+                if not open_ports:
+                    print(f"{Fore.RED}Invalid ports entered. Please try again.{Style.RESET_ALL}")
                 
             services = []
             for port in open_ports:
                 port_int = int(port)
-                if port_int == 80 or port_int == 443:
+                if port_int in [80, 443]:
                     services.append("http")
                 elif port_int == 22:
                     services.append("ssh")
@@ -1095,27 +1115,11 @@ if __name__ == "__main__":
                 else:
                     services.append("unknown")
             
-            print(f"{Fore.GREEN}Using manually entered ports: {', '.join(open_ports)}{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}Using manually entered ports: {', '.join(map(str, open_ports))}{Style.RESET_ALL}")
             
-        else:
-            print(f"{Fore.RED}Invalid option! Using automatic scan by default.{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}\nRunning Nmap scan to discover open ports...{Style.RESET_ALL}")
-            open_ports_data = scan_with_nmap(target_ip)
-            
-            if open_ports_data:
-                open_ports = [str(item['port']) for item in open_ports_data]
-                services = [item['service'] for item in open_ports_data]
-                
-                print(f"{Fore.GREEN}Found {len(open_ports)} open ports: {', '.join(open_ports)}{Style.RESET_ALL}")
-                print(f"{Fore.GREEN}Services detected: {', '.join(set(services))}{Style.RESET_ALL}")
-            else:
-                print(f"{Fore.RED}Nmap scan failed! Please try manual port entry.{Style.RESET_ALL}")
-                ports_input = input("Enter open ports (comma-separated): ")
-                open_ports = validate_ports([p.strip() for p in ports_input.split(",")])
-                
-                if not open_ports:
-                    print(f"{Fore.RED}No valid ports entered! Exiting.{Style.RESET_ALL}")
-                    exit(1)
+        if not open_ports:
+            print(f"{Fore.RED}No valid ports available! Exiting.{Style.RESET_ALL}")
+            exit(1)
 
         while True:
             print(f"\n{Fore.CYAN}=== Main Menu ==={Style.RESET_ALL}")
@@ -1135,111 +1139,111 @@ if __name__ == "__main__":
             if choice == "1":
                 print(f"{Fore.CYAN}\nTesting SQL Injection...{Style.RESET_ALL}")
                 sqli_test_paths = [
-            "view_items.php?id=",
-            "home.php?cat=",
-            "item_book.php?CAT=",
-            "www/index.php?page=",
-            "schule/termine.php?view=",
-            "goods_detail.php?data=",
-            "storemanager/contents/item.php?page_code=",
-            "customer/board.htm?mode=",
-            "help/com_view.html?code=",
-            "n_replyboard.php?typeboard=",
-            "eng_board/view.php?T****=",
-            "prev_results.php?prodID=",
-            "bbs/view.php?no=",
-            "gnu/?doc=",
-            "zb/view.php?uid=",
-            "global/product/product.php?gubun=",
-            "m_view.php?ps_db=",
-            "productlist.php?tid=",
-            "product-list.php?id=",
-            "onlinesales/product.php?product_id=",
-            "garden_equipment/Fruit-Cage/product.php?pr=",
-            "product.php?shopprodid=",
-            "product_info.php?products_id=",
-            "showsub.php?id=",
-            "product.php?sku=",
-            "store/product.php?productid=",
-            "productList.php?cat=",
-            "product_detail.php?product_id=",
-            "more_details.php?id=",
-            "county-facts/diary/vcsgen.php?id=",
-            "idlechat/message.php?id=",
-            "podcast/item.php?pid=",
-            "details.php?prodId=",
-            "ourblog.php?categoryid=",
-            "mall/more.php?ProdID=",
-            "archive/get.php?message_id=",
-            "review/review_form.php?item_id=",
-            "english/publicproducts.php?groupid=",
-            "news_and_notices.php?news_id=",
-            "rounds-detail.php?id=",
-            "gig.php?id=",
-            "board/view.php?no=",
-            "index.php?modus=",
-            "news_item.php?id=",
-            "rss.php?cat=",
-            "products/product.php?id=",
-            "details.php?ProdID=",
-            "els_/product/product.php?id=",
-            "store/description.php?iddesc=",
-            "socsci/news_items/full_story.php?id=",
-            "naboard/memo.php?bd=",
-            "bookmark/mybook/bookmark.php?bookPageNo=",
-            "board/board.html?table=",
-            "kboard/kboard.php?board=",
-            "order.asp?lotid=",
-            "goboard/front/board_view.php?code=",
-            "bbs/bbsView.php?id=",
-            "boardView.php?bbs=",
-            "eng/rgboard/view.php?&bbs_id=",
-            "product/product.php?cate=",
-            "content.php?p=",
-            "page.php?module=",
-            "?pid=",
-            "bookpage.php?id=",
-            "cbmer/congres/page.php?LAN=",
-            "content.php?id=",
-            "news.php?ID=",
-            "photogallery.php?id=",
-            "index.php?id=",
-            "product/product.php?product_no=",
-            "nyheder.htm?show=",
-            "book.php?ID=",
-            "print.php?id=",
-            "detail.php?id=",
-            "book.php?id=",
-            "content.php?PID=",
-            "more_detail.php?id=",
-            "content.php?id=",
-            "view_items.php?id=",
-            "view_author.php?id=",
-            "main.php?id=",
-            "english/fonction/print.php?id=",
-            "magazines/adult_magazine_single_page.php?magid=",
-            "product_details.php?prodid=",
-            "magazines/adult_magazine_full_year.php?magid=",
-            "products/card.php?prodID=",
-            "catalog/product.php?cat_id=",
-            "e_board/modifyform.html?code=",
-            "community/calendar-event-fr.php?id=",
-            "products.php?p=",
-            "news.php?id=",
-            "StoreRedirect.php?ID=",
-            "subcategories.php?id=",
-            "tek9.php?",
-            "template.php?Action=Item&pid=",
-            "topic.php?ID=",
-            "tuangou.php?bookid=",
-            "type.php?iType=",
-            "updatebasket.php?bookid=",
-            "updates.php?ID=",
-            "view.php?cid=",
-            "view_cart.php?title=",
-            "view_detail.php?ID=",
-            "viewcart.php?CartId=",
-            "viewCart.php?userID="
+                    "view_items.php?id=",
+                    "home.php?cat=",
+                    "item_book.php?CAT=",
+                    "www/index.php?page=",
+                    "schule/termine.php?view=",
+                    "goods_detail.php?data=",
+                    "storemanager/contents/item.php?page_code=",
+                    "customer/board.htm?mode=",
+                    "help/com_view.html?code=",
+                    "n_replyboard.php?typeboard=",
+                    "eng_board/view.php?T****=",
+                    "prev_results.php?prodID=",
+                    "bbs/view.php?no=",
+                    "gnu/?doc=",
+                    "zb/view.php?uid=",
+                    "global/product/product.php?gubun=",
+                    "m_view.php?ps_db=",
+                    "productlist.php?tid=",
+                    "product-list.php?id=",
+                    "onlinesales/product.php?product_id=",
+                    "garden_equipment/Fruit-Cage/product.php?pr=",
+                    "product.php?shopprodid=",
+                    "product_info.php?products_id=",
+                    "showsub.php?id=",
+                    "product.php?sku=",
+                    "store/product.php?productid=",
+                    "productList.php?cat=",
+                    "product_detail.php?product_id=",
+                    "more_details.php?id=",
+                    "county-facts/diary/vcsgen.php?id=",
+                    "idlechat/message.php?id=",
+                    "podcast/item.php?pid=",
+                    "details.php?prodId=",
+                    "ourblog.php?categoryid=",
+                    "mall/more.php?ProdID=",
+                    "archive/get.php?message_id=",
+                    "review/review_form.php?item_id=",
+                    "english/publicproducts.php?groupid=",
+                    "news_and_notices.php?news_id=",
+                    "rounds-detail.php?id=",
+                    "gig.php?id=",
+                    "board/view.php?no=",
+                    "index.php?modus=",
+                    "news_item.php?id=",
+                    "rss.php?cat=",
+                    "products/product.php?id=",
+                    "details.php?ProdID=",
+                    "els_/product/product.php?id=",
+                    "store/description.php?iddesc=",
+                    "socsci/news_items/full_story.php?id=",
+                    "naboard/memo.php?bd=",
+                    "bookmark/mybook/bookmark.php?bookPageNo=",
+                    "board/board.html?table=",
+                    "kboard/kboard.php?board=",
+                    "order.asp?lotid=",
+                    "goboard/front/board_view.php?code=",
+                    "bbs/bbsView.php?id=",
+                    "boardView.php?bbs=",
+                    "eng/rgboard/view.php?&bbs_id=",
+                    "product/product.php?cate=",
+                    "content.php?p=",
+                    "page.php?module=",
+                    "?pid=",
+                    "bookpage.php?id=",
+                    "cbmer/congres/page.php?LAN=",
+                    "content.php?id=",
+                    "news.php?ID=",
+                    "photogallery.php?id=",
+                    "index.php?id=",
+                    "product/product.php?product_no=",
+                    "nyheder.htm?show=",
+                    "book.php?ID=",
+                    "print.php?id=",
+                    "detail.php?id=",
+                    "book.php?id=",
+                    "content.php?PID=",
+                    "more_detail.php?id=",
+                    "content.php?id=",
+                    "view_items.php?id=",
+                    "view_author.php?id=",
+                    "main.php?id=",
+                    "english/fonction/print.php?id=",
+                    "magazines/adult_magazine_single_page.php?magid=",
+                    "product_details.php?prodid=",
+                    "magazines/adult_magazine_full_year.php?magid=",
+                    "products/card.php?prodID=",
+                    "catalog/product.php?cat_id=",
+                    "e_board/modifyform.html?code=",
+                    "community/calendar-event-fr.php?id=",
+                    "products.php?p=",
+                    "news.php?id=",
+                    "StoreRedirect.php?ID=",
+                    "subcategories.php?id=",
+                    "tek9.php?",
+                    "template.php?Action=Item&pid=",
+                    "topic.php?ID=",
+                    "tuangou.php?bookid=",
+                    "type.php?iType=",
+                    "updatebasket.php?bookid=",
+                    "updates.php?ID=",
+                    "view.php?cid=",
+                    "view_cart.php?title=",
+                    "view_detail.php?ID=",
+                    "viewcart.php?CartId=",
+                    "viewCart.php?userID="
                 ]
                 
                 vulnerable_urls = test_sqli_on_paths(target_ip, sqli_test_paths)
@@ -1365,7 +1369,7 @@ if __name__ == "__main__":
             
             elif choice == "9":
                 print(f"{Fore.CYAN}\nRescanning Ports...{Style.RESET_ALL}")
-                open_ports_data = scan_with_nmap(target_ip)
+                open_ports_data = scan_with_nmap(target_ip, timeout=120)
                 
                 if open_ports_data:
                     open_ports = [str(item['port']) for item in open_ports_data]
@@ -1388,5 +1392,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n{Fore.RED}Error: {str(e)}{Style.RESET_ALL}")
         logging.exception("Scan failed")
-
-
